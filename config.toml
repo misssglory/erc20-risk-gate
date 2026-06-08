@@ -1,0 +1,29 @@
+chain_id = "1"
+
+[logging]
+level = "info"
+
+[http]
+timeout_seconds = 20
+
+[api]
+# If empty/missing, TokenSniffer check is skipped.
+tokensniffer_api_key = ""
+
+# If empty/missing, Etherscan source check is skipped.
+etherscan_api_key = ""
+
+# Optional. GoPlus often works without this, but if you have a token, place it here.
+goplus_token = ""
+
+[rules]
+min_score_buy = 85
+tokensniffer_min_score = 60
+
+sell_tax_warn = 10.0
+sell_tax_block = 30.0
+
+buy_tax_warn = 10.0
+buy_tax_block = 30.0
+
+skip_unverified_source = true
