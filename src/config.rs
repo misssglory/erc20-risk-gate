@@ -8,6 +8,7 @@ use std::path::Path;
 pub struct AppConfig {
     pub chain_id: String,
     pub logging: LoggingConfig,
+    pub server: ServerConfig,
     pub http: HttpConfig,
     pub api: ApiConfig,
     pub rules: RulesConfig,
@@ -17,6 +18,13 @@ pub struct AppConfig {
 #[serde(default)]
 pub struct LoggingConfig {
     pub level: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct ServerConfig {
+    pub host: String,
+    pub port: u16,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -65,6 +73,7 @@ impl Default for AppConfig {
         Self {
             chain_id: "1".to_string(),
             logging: LoggingConfig::default(),
+            server: ServerConfig::default(),
             http: HttpConfig::default(),
             api: ApiConfig::default(),
             rules: RulesConfig::default(),
@@ -76,6 +85,15 @@ impl Default for LoggingConfig {
     fn default() -> Self {
         Self {
             level: "info".to_string(),
+        }
+    }
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            host: "127.0.0.1".to_string(),
+            port: 8080,
         }
     }
 }

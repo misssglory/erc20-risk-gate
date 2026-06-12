@@ -2,70 +2,102 @@ mod analysis;
 mod config;
 mod models;
 mod providers;
+mod scanner;
+mod server;
 
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use config::AppConfig;
-use models::{ProviderError, ProviderOutputs, SkippedCheck};
-use reqwest::Client;
+use scanner::Scanner;
 use std::path::PathBuf;
-use std::time::Duration;
-use tracing::{info, warn};
+use tracing::info;
 
 #[derive(Parser, Debug)]
-struct Args {
-    /// ERC-20 token address
-    #[arg(long)]
-    address: String,
-
-    /// Chain ID. Overrides config.toml chain_id.
-    #[arg(long)]
-    chain_id: Option<String>,
+#[command(name = "erc20-risk-gate")]
+#[command(version)]
+#[command(about = "ERC-20 token risk scanner")]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
 
     /// Path to config.toml
-    #[arg(long, default_value = "config.toml")]
+    #[arg(long, global = true, default_value = "config.toml")]
     config: PathBuf,
+}
 
-    /// Pretty-print JSON
-    #[arg(long)]
-    pretty: bool,
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Scan one token and print JSON to stdout
+    Scan {
+        /// ERC-20 token address
+        #[arg(long)]
+        address: String,
+
+        /// Chain ID. Overrides config.toml chain_id.
+        #[arg(long)]
+        chain_id: Option<String>,
+
+        /// Pretty-print JSON
+        #[arg(long)]
+        pretty: bool,
+    },
+
+    /// Start HTTP server
+    Serve {
+        /// Override server host from config.toml
+        #[arg(long)]
+        host: Option<String>,
+
+        /// Override server port from config.toml
+        #[arg(long)]
+        port: Option<u16>,
+    },
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args = Args::parse();
+    let cli = Cli::parse();
 
-    let mut cfg = AppConfig::load(&args.config)?;
-    if let Some(chain_id) = args.chain_id {
-        cfg.chain_id = chain_id;
-    }
-
+    let mut cfg = AppConfig::load(&cli.config)?;
     init_tracing(&cfg.logging.level);
 
-    info!(
-        chain_id = %cfg.chain_id,
-        address = %args.address,
-        "starting token risk scan"
-    );
+    match cli.command {
+        Commands::Scan {
+            address,
+            chain_id,
+            pretty,
+        } => {
+            if let Some(chain_id) = chain_id {
+                cfg.chain_id = chain_id;
+            }
 
-    let http = Client::builder()
-        .timeout(Duration::from_secs(cfg.http.timeout_seconds))
-        .user_agent("erc20-risk-gate/0.1")
-        .build()?;
+            info!(
+                chain_id = %cfg.chain_id,
+                address = %address,
+                "starting CLI token scan"
+            );
 
-    let outputs = fetch_all(&http, &cfg, &args.address).await;
+            let scanner = Scanner::new(cfg)?;
+            let report = scanner.scan(address, None).await;
 
-    let report = analysis::rules::analyze(
-        cfg.chain_id.clone(),
-        args.address.clone(),
-        &cfg.rules,
-        outputs,
-    );
+            if pretty {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!("{}", serde_json::to_string(&report)?);
+            }
+        }
 
-    if args.pretty {
-        println!("{}", serde_json::to_string_pretty(&report)?);
-    } else {
-        println!("{}", serde_json::to_string(&report)?);
+        Commands::Serve { host, port } => {
+            if let Some(host) = host {
+                cfg.server.host = host;
+            }
+
+            if let Some(port) = port {
+                cfg.server.port = port;
+            }
+
+            server::run(cfg).await?;
+        }
     }
 
     Ok(())
@@ -81,95 +113,4 @@ fn init_tracing(level: &str) {
         .with_target(false)
         .compact()
         .init();
-}
-
-async fn fetch_all(http: &Client, cfg: &AppConfig, address: &str) -> ProviderOutputs {
-    let mut outputs = ProviderOutputs::default();
-
-    if cfg.api.tokensniffer_api_key.trim().is_empty() {
-        outputs.skipped.push(SkippedCheck::new(
-            "tokensniffer",
-            "tokensniffer_api_key is missing",
-        ));
-    } else {
-        match providers::tokensniffer::fetch(
-            http,
-            &cfg.chain_id,
-            address,
-            &cfg.api.tokensniffer_api_key,
-        )
-        .await
-        {
-            Ok(v) => {
-                info!("TokenSniffer check completed");
-                outputs.tokensniffer = Some(v);
-            }
-            Err(e) => {
-                warn!(error = %e, "TokenSniffer check failed");
-                outputs.errors.push(ProviderError::new("tokensniffer", e));
-            }
-        }
-    }
-
-    match providers::goplus::fetch(http, &cfg.chain_id, address, cfg.api.goplus_token.as_deref())
-        .await
-    {
-        Ok(v) => {
-            info!("GoPlus check completed");
-            outputs.goplus = Some(v);
-        }
-        Err(e) => {
-            warn!(error = %e, "GoPlus check failed");
-            outputs.errors.push(ProviderError::new("goplus", e));
-        }
-    }
-
-    match providers::honeypot::fetch(http, &cfg.chain_id, address).await {
-        Ok(v) => {
-            info!("Honeypot.is check completed");
-            outputs.honeypot = Some(v);
-        }
-        Err(e) => {
-            warn!(error = %e, "Honeypot.is check failed");
-            outputs.errors.push(ProviderError::new("honeypot", e));
-        }
-    }
-
-    if cfg.api.etherscan_api_key.trim().is_empty() {
-        outputs.skipped.push(SkippedCheck::new(
-            "etherscan",
-            "etherscan_api_key is missing",
-        ));
-    } else {
-        match providers::etherscan::fetch_source(
-            http,
-            &cfg.chain_id,
-            address,
-            &cfg.api.etherscan_api_key,
-        )
-        .await
-        {
-            Ok(v) => {
-                info!("Etherscan source check completed");
-                outputs.etherscan_source = Some(v);
-            }
-            Err(e) => {
-                warn!(error = %e, "Etherscan source check failed");
-                outputs.errors.push(ProviderError::new("etherscan", e));
-            }
-        }
-    }
-
-    match providers::dexscreener::fetch_token_pairs(http, &cfg.chain_id, address).await {
-        Ok(v) => {
-            info!("DexScreener check completed");
-            outputs.dexscreener = Some(v);
-        }
-        Err(e) => {
-            warn!(error = %e, "DexScreener check failed");
-            outputs.errors.push(ProviderError::new("dexscreener", e));
-        }
-    }
-
-    outputs
 }
