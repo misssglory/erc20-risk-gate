@@ -81,6 +81,7 @@ erc20-risk-gate/
   flake.nix
   src/
     main.rs
+    chains.rs
     config.rs
     models.rs
     providers/
@@ -120,7 +121,8 @@ Run:
 Create a `config.toml` file in the project root.
 
 ```toml
-chain_id = "1"
+# Accepts: ethereum/eth/1, base/8453, bsc/bnb/56
+chain_id = "ethereum"
 
 [logging]
 level = "info"
@@ -188,6 +190,26 @@ goplus_token = "YOUR_GOPLUS_TOKEN"
 
 ---
 
+## Supported chains
+
+The scanner accepts friendly names and numeric aliases:
+
+```text
+ethereum: ethereum, eth, mainnet, 1
+base:     base, base-mainnet, 8453
+bsc:      bsc, bnb, binance-smart-chain, 56
+```
+
+Internally, each provider receives the chain format it expects:
+
+```text
+ethereum -> EVM 1    -> DexScreener ethereum
+base     -> EVM 8453 -> DexScreener base
+bsc      -> EVM 56   -> DexScreener bsc
+```
+
+---
+
 ## Usage
 
 Basic scan:
@@ -203,7 +225,7 @@ Override chain ID:
 ```bash
 cargo run -- \
   --config config.toml \
-  --chain-id 1 \
+  --chain-id ethereum \
   --address 0xTOKEN_ADDRESS
 ```
 
@@ -212,7 +234,7 @@ Pretty JSON:
 ```bash
 cargo run -- \
   --config config.toml \
-  --chain-id 1 \
+  --chain-id ethereum \
   --address 0xTOKEN_ADDRESS \
   --pretty
 ```
@@ -222,7 +244,7 @@ Release binary:
 ```bash
 ./target/release/erc20-risk-gate \
   --config config.toml \
-  --chain-id 1 \
+  --chain-id ethereum \
   --address 0xTOKEN_ADDRESS \
   --pretty
 ```
@@ -277,7 +299,7 @@ This makes the tool safe to pipe into other programs:
 ```bash
 erc20-risk-gate \
   --config config.toml \
-  --chain-id 1 \
+  --chain-id ethereum \
   --address 0xTOKEN_ADDRESS \
   | jq .
 ```

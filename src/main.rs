@@ -1,4 +1,5 @@
 mod analysis;
+mod chains;
 mod config;
 mod models;
 mod providers;
@@ -33,7 +34,7 @@ enum Commands {
         #[arg(long)]
         address: String,
 
-        /// Chain ID. Overrides config.toml chain_id.
+        /// Chain selector. Accepts ethereum/eth/1, base/8453, bsc/bnb/56. Overrides config.toml chain_id.
         #[arg(long)]
         chain_id: Option<String>,
 

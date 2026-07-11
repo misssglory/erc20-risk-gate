@@ -1,4 +1,5 @@
-chain_id = "1"
+# Accepts: ethereum/eth/1, base/8453, bsc/bnb/56
+chain_id = "ethereum"
 
 [logging]
 level = "info"
@@ -12,7 +13,7 @@ timeout_seconds = 20
 
 [api]
 tokensniffer_api_key = ""
-etherscan_api_key = ""
+etherscan_api_key = "42SF3SUB2FZN5I5GFDTQGN37QEMP5EG67U"
 goplus_token = ""
 
 [rules]

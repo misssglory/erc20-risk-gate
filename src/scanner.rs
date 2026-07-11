@@ -1,6 +1,7 @@
 use crate::analysis;
+use crate::chains::ResolvedChain;
 use crate::config::AppConfig;
-use crate::models::{ProviderError, ProviderOutputs, RiskReport, SkippedCheck};
+use crate::models::{Decision, ProviderError, ProviderOutputs, ProviderStatus, RiskReport, SkippedCheck};
 use anyhow::Result;
 use reqwest::Client;
 use std::time::Duration;
@@ -23,25 +24,35 @@ impl Scanner {
     }
 
     pub async fn scan(&self, address: String, chain_id_override: Option<String>) -> RiskReport {
-        let chain_id = chain_id_override.unwrap_or_else(|| self.cfg.chain_id.clone());
+        let chain_input = chain_id_override.unwrap_or_else(|| self.cfg.chain_id.clone());
+
+        let chain = match ResolvedChain::resolve(&chain_input) {
+            Ok(chain) => chain,
+            Err(error) => {
+                return unsupported_chain_report(chain_input, address, error.to_string());
+            }
+        };
 
         info!(
-            chain_id = %chain_id,
+            chain_input = %chain.input,
+            chain = %chain.canonical,
+            evm_chain_id = %chain.evm_chain_id,
+            dexscreener_chain_id = %chain.dexscreener_chain_id,
             address = %address,
             "starting token scan"
         );
 
-        let outputs = self.fetch_all(&chain_id, &address).await;
+        let outputs = self.fetch_all(&chain, &address).await;
 
         analysis::rules::analyze(
-            chain_id,
+            chain.evm_chain_id.to_string(),
             address,
             &self.cfg.rules,
             outputs,
         )
     }
 
-    async fn fetch_all(&self, chain_id: &str, address: &str) -> ProviderOutputs {
+    async fn fetch_all(&self, chain: &ResolvedChain, address: &str) -> ProviderOutputs {
         let mut outputs = ProviderOutputs::default();
 
         if self.cfg.api.tokensniffer_api_key.trim().is_empty() {
@@ -52,7 +63,7 @@ impl Scanner {
         } else {
             match crate::providers::tokensniffer::fetch(
                 &self.http,
-                chain_id,
+                chain.tokensniffer_chain_id,
                 address,
                 &self.cfg.api.tokensniffer_api_key,
             )
@@ -71,7 +82,7 @@ impl Scanner {
 
         match crate::providers::goplus::fetch(
             &self.http,
-            chain_id,
+            chain.goplus_chain_id,
             address,
             self.cfg.api.goplus_token.as_deref(),
         )
@@ -87,7 +98,7 @@ impl Scanner {
             }
         }
 
-        match crate::providers::honeypot::fetch(&self.http, chain_id, address).await {
+        match crate::providers::honeypot::fetch(&self.http, chain.honeypot_chain_id, address).await {
             Ok(v) => {
                 info!("Honeypot.is check completed");
                 outputs.honeypot = Some(v);
@@ -106,7 +117,7 @@ impl Scanner {
         } else {
             match crate::providers::etherscan::fetch_source(
                 &self.http,
-                chain_id,
+                chain.etherscan_chain_id,
                 address,
                 &self.cfg.api.etherscan_api_key,
             )
@@ -123,7 +134,13 @@ impl Scanner {
             }
         }
 
-        match crate::providers::dexscreener::fetch_token_pairs(&self.http, chain_id, address).await {
+        match crate::providers::dexscreener::fetch_token_pairs(
+            &self.http,
+            chain.dexscreener_chain_id,
+            address,
+        )
+        .await
+        {
             Ok(v) => {
                 info!("DexScreener check completed");
                 outputs.dexscreener = Some(v);
@@ -135,5 +152,25 @@ impl Scanner {
         }
 
         outputs
+    }
+}
+
+fn unsupported_chain_report(chain_id: String, address: String, message: String) -> RiskReport {
+    RiskReport {
+        chain_id,
+        token_address: address,
+        decision: Decision::Skip,
+        score: 0,
+        hard_blocks: vec![message],
+        warnings: Vec::new(),
+        skipped_checks: Vec::new(),
+        provider_errors: Vec::new(),
+        provider_status: ProviderStatus {
+            tokensniffer: "not_run".to_string(),
+            goplus: "not_run".to_string(),
+            honeypot: "not_run".to_string(),
+            etherscan_source: "not_run".to_string(),
+            dexscreener: "not_run".to_string(),
+        },
     }
 }
