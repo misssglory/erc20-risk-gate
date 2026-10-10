@@ -2,45 +2,57 @@ use crate::analysis::source_scan::scan_source_code;
 use crate::analysis::value_ext::{
     bool_at, first_goplus_token, number_at, recursive_bool, recursive_number,
 };
-use crate::config::RulesConfig;
+use crate::config::{RobinhoodConfig, RulesConfig};
 use crate::models::{Decision, ProviderOutputs, ProviderStatus, RiskReport};
 
 pub fn analyze(
     chain_id: String,
     token_address: String,
     rules: &RulesConfig,
+    robinhood_cfg: &RobinhoodConfig,
     outputs: ProviderOutputs,
 ) -> RiskReport {
     let mut score: i32 = 100;
     let mut hard_blocks = Vec::new();
     let mut warnings = Vec::new();
+    let is_robinhood = chain_id == "4663";
 
-    analyze_tokensniffer(
-        outputs.tokensniffer.as_ref(),
-        rules,
-        &mut score,
-        &mut hard_blocks,
-        &mut warnings,
-    );
+    if is_robinhood {
+        analyze_robinhood(
+            outputs.robinhood.as_ref(),
+            robinhood_cfg,
+            &mut score,
+            &mut hard_blocks,
+            &mut warnings,
+        );
+    } else {
+        analyze_tokensniffer(
+            outputs.tokensniffer.as_ref(),
+            rules,
+            &mut score,
+            &mut hard_blocks,
+            &mut warnings,
+        );
+
+        analyze_honeypot(
+            outputs.honeypot.as_ref(),
+            rules,
+            &mut score,
+            &mut hard_blocks,
+            &mut warnings,
+        );
+
+        analyze_etherscan_source(
+            outputs.etherscan_source.as_ref(),
+            rules,
+            &mut score,
+            &mut hard_blocks,
+            &mut warnings,
+        );
+    }
 
     analyze_goplus(
         outputs.goplus.as_ref(),
-        rules,
-        &mut score,
-        &mut hard_blocks,
-        &mut warnings,
-    );
-
-    analyze_honeypot(
-        outputs.honeypot.as_ref(),
-        rules,
-        &mut score,
-        &mut hard_blocks,
-        &mut warnings,
-    );
-
-    analyze_etherscan_source(
-        outputs.etherscan_source.as_ref(),
         rules,
         &mut score,
         &mut hard_blocks,
@@ -69,7 +81,10 @@ pub fn analyze(
         honeypot: status(outputs.honeypot.is_some(), "honeypot", &outputs),
         etherscan_source: status(outputs.etherscan_source.is_some(), "etherscan", &outputs),
         dexscreener: status(outputs.dexscreener.is_some(), "dexscreener", &outputs),
+        robinhood: status(outputs.robinhood.is_some(), "robinhood", &outputs),
     };
+
+    let robinhood_risk = outputs.robinhood.clone();
 
     RiskReport {
         chain_id,
@@ -81,6 +96,7 @@ pub fn analyze(
         skipped_checks: outputs.skipped,
         provider_errors: outputs.errors,
         provider_status,
+        robinhood_risk,
     }
 }
 
@@ -98,6 +114,112 @@ fn status(ok: bool, provider: &str, outputs: &ProviderOutputs) -> String {
     }
 
     "not_run".to_string()
+}
+
+fn analyze_robinhood(
+    value: Option<&crate::providers::robinhood::RobinhoodRiskResult>,
+    cfg: &RobinhoodConfig,
+    score: &mut i32,
+    hard_blocks: &mut Vec<String>,
+    warnings: &mut Vec<String>,
+) {
+    if !cfg.enabled {
+        warnings.push("Robinhood native risk gate is disabled".to_string());
+        *score -= 40;
+        return;
+    }
+
+    let Some(risk) = value else {
+        warnings.push("Robinhood native risk gate unavailable; do not treat this scan as sellability proof".to_string());
+        *score -= 45;
+        return;
+    };
+
+    if let Some(shift) = risk.blocked_sell_signature_shift {
+        hard_blocks.push(format!(
+            "Robinhood: blocked-sell bytecode signature detected at bit shift {shift}"
+        ));
+        *score -= 100;
+    }
+
+    if cfg.hard_block_known_bad_actor && risk.known_bad_deployer {
+        hard_blocks.push(format!(
+            "Robinhood: deployer is in the local bad-actor database{}",
+            risk.deployer
+                .as_deref()
+                .map(|value| format!(": {value}"))
+                .unwrap_or_default()
+        ));
+        *score -= 100;
+    }
+
+    if cfg.hard_block_known_bad_actor && risk.known_bad_owner {
+        hard_blocks.push(format!(
+            "Robinhood: owner is in the local bad-actor database{}",
+            risk.owner
+                .as_deref()
+                .map(|value| format!(": {value}"))
+                .unwrap_or_default()
+        ));
+        *score -= 100;
+    }
+
+    match risk.holder_transfer_test.as_ref() {
+        Some(test) if test.outcome == "reverted" => {
+            let detail = test
+                .revert_reason
+                .as_deref()
+                .filter(|value| !value.trim().is_empty())
+                .map(|value| format!(": {value}"))
+                .unwrap_or_default();
+            hard_blocks.push(format!(
+                "Robinhood: transfer from real holder reverted{detail}"
+            ));
+            *score -= 100;
+        }
+        Some(test) if test.outcome == "returned_false" => {
+            hard_blocks.push(
+                "Robinhood: transfer from real holder returned false".to_string(),
+            );
+            *score -= 100;
+        }
+        Some(test) if test.outcome == "success" => {}
+        Some(test) => {
+            warnings.push(format!(
+                "Robinhood: holder transfer simulation was inconclusive ({})",
+                test.outcome
+            ));
+            *score -= 35;
+        }
+        None => {
+            warnings.push(
+                "Robinhood: no real-holder transfer simulation was available; pre-flip sellability is not proven"
+                    .to_string(),
+            );
+            *score -= 35;
+        }
+    }
+
+    if risk.template_shape_match && !risk.blocked_sell_signature {
+        warnings.push(format!(
+            "Robinhood: token matches the suspicious 8-10 KB / 9-decimal / retained-owner template ({} bytes)",
+            risk.bytecode_bytes
+        ));
+        *score -= 30;
+    } else {
+        if risk.decimals == Some(9) {
+            warnings.push("Robinhood: token uses 9 decimals (seen in the blocked-sell family)".to_string());
+            *score -= 5;
+        }
+        if risk.owner_equals_deployer == Some(true) {
+            warnings.push("Robinhood: deployer still owns the token contract".to_string());
+            *score -= 10;
+        }
+    }
+
+    for diagnostic in &risk.diagnostics {
+        warnings.push(format!("Robinhood diagnostic: {diagnostic}"));
+    }
 }
 
 fn analyze_tokensniffer(

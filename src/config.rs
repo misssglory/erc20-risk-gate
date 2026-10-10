@@ -11,6 +11,7 @@ pub struct AppConfig {
     pub server: ServerConfig,
     pub http: HttpConfig,
     pub api: ApiConfig,
+    pub robinhood: RobinhoodConfig,
     pub rules: RulesConfig,
 }
 
@@ -39,6 +40,24 @@ pub struct ApiConfig {
     pub tokensniffer_api_key: String,
     pub etherscan_api_key: String,
     pub goplus_token: Option<String>,
+}
+
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct RobinhoodConfig {
+    pub enabled: bool,
+    pub rpc_url: String,
+    pub blockscout_url: String,
+    pub holders_limit: u32,
+    pub transfer_amount_divisor: u32,
+    pub transfer_target: String,
+    pub template_min_bytecode_bytes: usize,
+    pub template_max_bytecode_bytes: usize,
+    pub bad_actor_db_path: String,
+    pub hard_block_known_bad_actor: bool,
+    pub bad_deployers: Vec<String>,
+    pub bad_owners: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -76,6 +95,7 @@ impl Default for AppConfig {
             server: ServerConfig::default(),
             http: HttpConfig::default(),
             api: ApiConfig::default(),
+            robinhood: RobinhoodConfig::default(),
             rules: RulesConfig::default(),
         }
     }
@@ -112,6 +132,25 @@ impl Default for ApiConfig {
             tokensniffer_api_key: String::new(),
             etherscan_api_key: String::new(),
             goplus_token: None,
+        }
+    }
+}
+
+impl Default for RobinhoodConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            rpc_url: "https://rpc.mainnet.chain.robinhood.com".to_string(),
+            blockscout_url: "https://robinhoodchain.blockscout.com".to_string(),
+            holders_limit: 50,
+            transfer_amount_divisor: 100,
+            transfer_target: "0x8366a39cc670b4001a1121b8f6a443a643e40951".to_string(),
+            template_min_bytecode_bytes: 8 * 1024,
+            template_max_bytecode_bytes: 10 * 1024,
+            bad_actor_db_path: "robinhood-bad-actors.json".to_string(),
+            hard_block_known_bad_actor: true,
+            bad_deployers: Vec::new(),
+            bad_owners: Vec::new(),
         }
     }
 }

@@ -1,4 +1,5 @@
 use crate::providers::etherscan::EtherscanContract;
+use crate::providers::robinhood::RobinhoodRiskResult;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -9,6 +10,7 @@ pub struct ProviderOutputs {
     pub honeypot: Option<Value>,
     pub etherscan_source: Option<EtherscanContract>,
     pub dexscreener: Option<Value>,
+    pub robinhood: Option<RobinhoodRiskResult>,
     pub skipped: Vec<SkippedCheck>,
     pub errors: Vec<ProviderError>,
 }
@@ -24,6 +26,8 @@ pub struct RiskReport {
     pub skipped_checks: Vec<SkippedCheck>,
     pub provider_errors: Vec<ProviderError>,
     pub provider_status: ProviderStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub robinhood_risk: Option<RobinhoodRiskResult>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -71,4 +75,5 @@ pub struct ProviderStatus {
     pub honeypot: String,
     pub etherscan_source: String,
     pub dexscreener: String,
+    pub robinhood: String,
 }

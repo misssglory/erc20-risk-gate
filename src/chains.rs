@@ -35,6 +35,10 @@ impl ResolvedChain {
                 Ok(Self::new(raw, "bsc", "56", "bsc"))
             }
 
+            "4663" | "robinhood" | "robinhoodchain" | "robinhoodmainnet" | "hood" | "rh" => {
+                Ok(Self::new(raw, "robinhood", "4663", "robinhood"))
+            }
+
             _ => bail!(
                 "unsupported chain `{}`; supported chains: {}",
                 raw,
@@ -62,6 +66,6 @@ impl ResolvedChain {
     }
 
     pub fn supported_names() -> &'static str {
-        "ethereum/eth/1, base/8453, bsc/bnb/56"
+        "ethereum/eth/1, base/8453, bsc/bnb/56, robinhood/hood/rh/4663"
     }
 }

@@ -20,7 +20,7 @@
         in
         pkgs.rustPlatform.buildRustPackage {
           pname = "erc20-risk-gate";
-          version = "0.1.0";
+          version = "0.2.0";
 
           src = ./.;
 

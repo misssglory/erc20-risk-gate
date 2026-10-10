@@ -1,0 +1,8 @@
+ADDR="$1"
+
+curl -s http://127.0.0.1:8333/scan \
+  -H 'content-type: application/json' \
+  -d '{
+    "chain_id": "1",
+    "address": \"$ADDR\"
+  }' | jq .

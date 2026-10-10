@@ -3,3 +3,5 @@ pub mod etherscan;
 pub mod goplus;
 pub mod honeypot;
 pub mod tokensniffer;
+
+pub mod robinhood;

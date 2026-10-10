@@ -34,7 +34,7 @@ enum Commands {
         #[arg(long)]
         address: String,
 
-        /// Chain selector. Accepts ethereum/eth/1, base/8453, bsc/bnb/56. Overrides config.toml chain_id.
+        /// Chain selector. Accepts ethereum/eth/1, base/8453, bsc/bnb/56, robinhood/hood/rh/4663. Overrides config.toml chain_id.
         #[arg(long)]
         chain_id: Option<String>,
 

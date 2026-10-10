@@ -1,0 +1,28 @@
+chain_id = "1"
+
+[logging]
+level = "info"
+
+[server]
+host = "127.0.0.1"
+port = 8333
+
+[http]
+timeout_seconds = 20
+
+[api]
+tokensniffer_api_key = ""
+etherscan_api_key = "42SF3SUB2FZN5I5GFDTQGN37QEMP5EG67U"
+goplus_token = ""
+
+[rules]
+min_score_buy = 85
+tokensniffer_min_score = 60
+
+sell_tax_warn = 1.0
+sell_tax_block = 5.0
+
+buy_tax_warn = 1.0
+buy_tax_block = 5.0
+
+skip_unverified_source = true

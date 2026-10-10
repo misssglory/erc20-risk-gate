@@ -27,6 +27,10 @@ The project is designed as a **pre-trade risk gate** for trading bots, snipers, 
 * Honeypot.is integration
 * Etherscan source-code lookup
 * DexScreener liquidity check
+* Native Robinhood Chain (4663) honeypot gate
+* Bit-aligned runtime-bytecode fingerprinting (shifts 0 through 7)
+* Real-holder `eth_call` transfer simulation through the Uniswap v4 PoolManager
+* Persistent bad-deployer / bad-owner memory for confirmed Robinhood honeypots
 * Basic Solidity source-code pattern scanner
 * Nix flake support
 * NixOS system-wide installation support
@@ -60,6 +64,9 @@ Returned when at least one hard blocker is found.
 
 Examples of hard blockers:
 
+* Robinhood blocked-sell bytecode signature detected
+* Robinhood real-holder transfer reverts or returns `false`
+* Robinhood deployer/owner matches the local confirmed bad-actor database
 * honeypot detected
 * sell simulation failed
 * sell tax too high
@@ -91,6 +98,7 @@ erc20-risk-gate/
       honeypot.rs
       etherscan.rs
       dexscreener.rs
+      robinhood.rs
     analysis/
       mod.rs
       rules.rs
@@ -121,7 +129,7 @@ Run:
 Create a `config.toml` file in the project root.
 
 ```toml
-# Accepts: ethereum/eth/1, base/8453, bsc/bnb/56
+# Accepts: ethereum/eth/1, base/8453, bsc/bnb/56, robinhood/hood/rh/4663
 chain_id = "ethereum"
 
 [logging]
@@ -134,6 +142,20 @@ timeout_seconds = 20
 tokensniffer_api_key = ""
 etherscan_api_key = ""
 goplus_token = ""
+
+[robinhood]
+enabled = true
+rpc_url = "https://rpc.mainnet.chain.robinhood.com"
+blockscout_url = "https://robinhoodchain.blockscout.com"
+holders_limit = 50
+transfer_amount_divisor = 100
+transfer_target = "0x8366a39cc670b4001a1121b8f6a443a643e40951"
+template_min_bytecode_bytes = 8192
+template_max_bytecode_bytes = 10240
+bad_actor_db_path = "robinhood-bad-actors.json"
+hard_block_known_bad_actor = true
+bad_deployers = []
+bad_owners = []
 
 [rules]
 min_score_buy = 85
@@ -198,14 +220,16 @@ The scanner accepts friendly names and numeric aliases:
 ethereum: ethereum, eth, mainnet, 1
 base:     base, base-mainnet, 8453
 bsc:      bsc, bnb, binance-smart-chain, 56
+robinhood: robinhood, hood, rh, robinhood-chain, 4663
 ```
 
 Internally, each provider receives the chain format it expects:
 
 ```text
-ethereum -> EVM 1    -> DexScreener ethereum
-base     -> EVM 8453 -> DexScreener base
-bsc      -> EVM 56   -> DexScreener bsc
+ethereum  -> EVM 1    -> DexScreener ethereum
+base      -> EVM 8453 -> DexScreener base
+bsc       -> EVM 56   -> DexScreener bsc
+robinhood -> EVM 4663 -> DexScreener robinhood + native RPC/Blockscout gate
 ```
 
 ---
@@ -217,6 +241,7 @@ Basic scan:
 ```bash
 cargo run -- \
   --config config.toml \
+  scan \
   --address 0xTOKEN_ADDRESS
 ```
 
@@ -225,6 +250,7 @@ Override chain ID:
 ```bash
 cargo run -- \
   --config config.toml \
+  scan \
   --chain-id ethereum \
   --address 0xTOKEN_ADDRESS
 ```
@@ -234,16 +260,34 @@ Pretty JSON:
 ```bash
 cargo run -- \
   --config config.toml \
+  scan \
   --chain-id ethereum \
   --address 0xTOKEN_ADDRESS \
   --pretty
 ```
+
+
+Robinhood Chain native gate:
+
+```bash
+cargo run -- \
+  --config config.toml \
+  scan \
+  --chain-id 4663 \
+  --address 0xTOKEN_ADDRESS \
+  --pretty
+```
+
+For Robinhood Chain, the report includes a `robinhood_risk` object with runtime bytecode size, bit-shift signature match, decimals, deployer, owner, selected real holder, transfer-test outcome and bad-actor matches.
+
+---
 
 Release binary:
 
 ```bash
 ./target/release/erc20-risk-gate \
   --config config.toml \
+  scan \
   --chain-id ethereum \
   --address 0xTOKEN_ADDRESS \
   --pretty
@@ -281,7 +325,8 @@ Release binary:
     "goplus": "ok",
     "honeypot": "ok",
     "etherscan_source": "skipped",
-    "dexscreener": "ok"
+    "dexscreener": "ok",
+    "robinhood": "not_run"
   }
 }
 ```
@@ -299,6 +344,7 @@ This makes the tool safe to pipe into other programs:
 ```bash
 erc20-risk-gate \
   --config config.toml \
+  scan \
   --chain-id ethereum \
   --address 0xTOKEN_ADDRESS \
   | jq .
@@ -323,7 +369,34 @@ level = "trace"
 
 ---
 
+## Robinhood Chain native honeypot gate
+
+Robinhood Chain mainnet is chain ID `4663`. When that chain is selected, the scanner runs a native gate that does not depend on a third-party honeypot API:
+
+1. Fetch runtime bytecode with `eth_getCode`.
+2. Re-align the byte stream at bit shifts `0..7` and search for `Blocked: cannot sell.`. A match is a hard block even before the storage flag flips.
+3. Read `decimals()` and `owner()` and resolve the deployer through Blockscout.
+4. Fetch the top token holders from Blockscout, skip the deployer, owner and contract addresses (pools/lockers), then confirm the holder's current balance with `balanceOf`.
+5. Simulate `transfer(holder -> PoolManager, amount)` with `eth_call`, using 1% of the holder balance by default. A revert or an ERC-20 `false` return is a hard block.
+6. If direct honeypot evidence is found, persist the token's deployer and owner in `robinhood-bad-actors.json`. Future tokens from either actor are hard-blocked before purchase when `hard_block_known_bad_actor = true`.
+
+The 8-10 KB / 9-decimal / retained-owner shape is also reported as a warning. The static blocked-sell signature itself is treated as direct evidence because it survives the pre-flip window.
+
+### Rechecking
+
+A successful transfer simulation is a point-in-time result. The observed Robinhood honeypot family can enable the sell block after buyers arrive. Call `/scan` again for young or held tokens; the static fingerprint catches the known family before the flip, while repeated live simulations catch state changes and unrelated dynamic restrictions. The service intentionally leaves scheduling cadence to the caller/trading system.
+
+### Bad-actor persistence
+
+`bad_actor_db_path` is updated only from **direct evidence** (blocked-sell bytecode signature or a failed real-holder transfer). A token that is blocked only because its deployer was already known bad does not cause unrelated addresses to be learned transitively. You can pre-seed known addresses with `bad_deployers` and `bad_owners` in `config.toml`.
+
+---
+
 ## Providers
+
+### Robinhood native gate
+
+Used on chain `4663` for runtime bytecode fingerprinting, deployer/owner attribution, real-holder transfer simulation, and local bad-actor persistence.
 
 ### TokenSniffer
 
@@ -337,7 +410,7 @@ Used for:
 * source/code risk flags
 * similar contract information
 
-Skipped if no API key is configured.
+Skipped if no API key is configured. On Robinhood Chain it is intentionally skipped in favor of the native gate.
 
 ### GoPlus Security
 
@@ -354,7 +427,7 @@ Used for:
 
 ### Honeypot.is
 
-Used for:
+Used on supported non-Robinhood chains for:
 
 * honeypot detection
 * buy/sell simulation data
@@ -362,7 +435,7 @@ Used for:
 
 ### Etherscan
 
-Used for:
+Used on supported non-Robinhood chains for:
 
 * verified source-code lookup
 * proxy detection
