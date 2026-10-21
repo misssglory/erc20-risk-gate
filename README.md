@@ -25,13 +25,14 @@ The project is designed as a **pre-trade risk gate** for trading bots, snipers, 
 * TokenSniffer integration
 * GoPlus Security integration
 * Honeypot.is integration
-* Etherscan source-code lookup
+* Etherscan source-code lookup, including Robinhood Chain / RobinScan verified sources
 * DexScreener liquidity check
 * Native Robinhood Chain (4663) honeypot gate
 * Bit-aligned runtime-bytecode fingerprinting (shifts 0 through 7)
 * Real-holder `eth_call` transfer simulation through the Uniswap v4 PoolManager
 * Persistent bad-deployer / bad-owner memory for confirmed Robinhood honeypots
 * Basic Solidity source-code pattern scanner
+* Launchpad entity detection from contract name, source text and source filenames (`Pons` highlighted explicitly)
 * Nix flake support
 * NixOS system-wide installation support
 
@@ -146,7 +147,6 @@ goplus_token = ""
 [robinhood]
 enabled = true
 rpc_url = "https://rpc.mainnet.chain.robinhood.com"
-blockscout_url = "https://robinhoodchain.blockscout.com"
 holders_limit = 50
 transfer_amount_divisor = 100
 transfer_target = "0x8366a39cc670b4001a1121b8f6a443a643e40951"
@@ -185,9 +185,11 @@ If `tokensniffer_api_key` is empty or missing, the TokenSniffer check is skipped
 tokensniffer_api_key = "YOUR_TOKENSNIFFER_API_KEY"
 ```
 
-### Etherscan
+### Etherscan / RobinScan
 
-If `etherscan_api_key` is empty or missing, the Etherscan source-code check is skipped.
+For Ethereum/Base/BSC, `etherscan_api_key` is required for the Etherscan V2 source-code lookup.
+
+For Robinhood Chain (`4663`), the scanner prefers Etherscan V2 when the key is configured and falls back to the verified source shown on `https://robin.etherscan.io/token/<CA>#code`. The fallback normalizes multi-file source into filenames + contents before scanning.
 
 ```toml
 [api]
@@ -229,7 +231,7 @@ Internally, each provider receives the chain format it expects:
 ethereum  -> EVM 1    -> DexScreener ethereum
 base      -> EVM 8453 -> DexScreener base
 bsc       -> EVM 56   -> DexScreener bsc
-robinhood -> EVM 4663 -> DexScreener robinhood + native RPC/Blockscout gate
+robinhood -> EVM 4663 -> DexScreener robinhood + native RPC/Etherscan V2 gate
 ```
 
 ---
@@ -280,6 +282,8 @@ cargo run -- \
 
 For Robinhood Chain, the report includes a `robinhood_risk` object with runtime bytecode size, bit-shift signature match, decimals, deployer, owner, selected real holder, transfer-test outcome and bad-actor matches.
 
+Verified source is reported separately in `source_analysis`. It includes the source origin, explorer URL, normalized source filenames, `launchpad_entity_found`, `pons_found`, and detailed `launchpad_entities_found` evidence showing whether each entity matched source text, a filename, and/or the verified contract name.
+
 ---
 
 Release binary:
@@ -324,9 +328,26 @@ Release binary:
     "tokensniffer": "skipped",
     "goplus": "ok",
     "honeypot": "ok",
-    "etherscan_source": "skipped",
+    "etherscan_source": "ok",
     "dexscreener": "ok",
     "robinhood": "not_run"
+  },
+  "source_analysis": {
+    "verified": true,
+    "provider": "etherscan_v2",
+    "source_url": "https://robin.etherscan.io/token/0xTOKEN_ADDRESS#code",
+    "contract_name": "ExampleToken",
+    "source_file_names": ["src/PonsToken.sol"],
+    "launchpad_entity_found": true,
+    "pons_found": true,
+    "launchpad_entities_found": [
+      {
+        "entity": "Pons",
+        "found_in_source": true,
+        "found_in_file_name": true,
+        "matched_file_names": ["src/PonsToken.sol"]
+      }
+    ]
   }
 }
 ```
@@ -375,8 +396,8 @@ Robinhood Chain mainnet is chain ID `4663`. When that chain is selected, the sca
 
 1. Fetch runtime bytecode with `eth_getCode`.
 2. Re-align the byte stream at bit shifts `0..7` and search for `Blocked: cannot sell.`. A match is a hard block even before the storage flag flips.
-3. Read `decimals()` and `owner()` and resolve the deployer through Blockscout.
-4. Fetch the top token holders from Blockscout, skip the deployer, owner and contract addresses (pools/lockers), then confirm the holder's current balance with `balanceOf`.
+3. Read `decimals()` and `owner()` and resolve the deployer through Etherscan V2.
+4. Fetch the top token holders from Etherscan V2, skip the deployer, owner and contract addresses (pools/lockers), then confirm the holder's current balance with `balanceOf`.
 5. Simulate `transfer(holder -> PoolManager, amount)` with `eth_call`, using 1% of the holder balance by default. A revert or an ERC-20 `false` return is a hard block.
 6. If direct honeypot evidence is found, persist the token's deployer and owner in `robinhood-bad-actors.json`. Future tokens from either actor are hard-blocked before purchase when `hard_block_known_bad_actor = true`.
 
@@ -396,7 +417,7 @@ A successful transfer simulation is a point-in-time result. The observed Robinho
 
 ### Robinhood native gate
 
-Used on chain `4663` for runtime bytecode fingerprinting, deployer/owner attribution, real-holder transfer simulation, and local bad-actor persistence.
+Used on chain `4663` for runtime bytecode fingerprinting, Etherscan V2 deployer/holder attribution, real-holder transfer simulation, and local bad-actor persistence.
 
 ### TokenSniffer
 
@@ -433,17 +454,19 @@ Used on supported non-Robinhood chains for:
 * buy/sell simulation data
 * tax simulation
 
-### Etherscan
+### Etherscan / RobinScan source
 
-Used on supported non-Robinhood chains for:
+Used for:
 
 * verified source-code lookup
-* proxy detection
+* multi-file source normalization and filename extraction
+* proxy detection where Etherscan API metadata is available
 * implementation address
 * similar contract match
 * basic static source scan
+* launchpad entity discovery from contract name, source text and filenames
 
-Skipped if no API key is configured.
+On Robinhood Chain the scanner uses Etherscan V2 when an API key is configured, otherwise it attempts the public RobinScan token/address code pages. `Pons` is exposed as a dedicated `pons_found` flag in addition to the generic entity list.
 
 ### DexScreener
 

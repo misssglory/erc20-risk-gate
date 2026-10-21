@@ -1,5 +1,6 @@
 use anyhow::{anyhow, bail, Context, Result};
 use reqwest::Client;
+use crate::providers::etherscan;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -216,7 +217,7 @@ impl BadActorStore {
 pub async fn fetch(
     http: &Client,
     rpc_url: &str,
-    blockscout_url: &str,
+    etherscan_api_key: &str,
     address: &str,
     holders_limit: u32,
     transfer_amount_divisor: u32,
@@ -263,10 +264,17 @@ pub async fn fetch(
         }
     };
 
-    let deployer = match fetch_deployer(http, blockscout_url, &address).await {
-        Ok(value) => value,
+    let deployer = match etherscan::fetch_contract_creator(
+        http,
+        "4663",
+        &address,
+        etherscan_api_key,
+    )
+    .await
+    {
+        Ok(value) => value.and_then(|value| normalize_address(&value)),
         Err(error) => {
-            diagnostics.push(format!("Blockscout deployer lookup failed: {error}"));
+            diagnostics.push(format!("Etherscan deployer lookup failed: {error}"));
             None
         }
     };
@@ -287,7 +295,15 @@ pub async fn fetch(
         && ownership_retained
         && owner_equals_deployer.unwrap_or(false);
 
-    let holder_transfer_test = match fetch_holders(http, blockscout_url, &address, holders_limit).await {
+    let holder_transfer_test = match etherscan::fetch_token_holders(
+        http,
+        "4663",
+        &address,
+        etherscan_api_key,
+        holders_limit,
+    )
+    .await
+    {
         Ok(holders) => match select_real_holder(
             http,
             rpc_url,
@@ -321,7 +337,7 @@ pub async fn fetch(
             }
         },
         Err(error) => {
-            diagnostics.push(format!("Blockscout holder lookup failed: {error}"));
+            diagnostics.push(format!("Etherscan holder lookup failed: {error}"));
             None
         }
     };
@@ -341,61 +357,6 @@ pub async fn fetch(
         known_bad_owner: false,
         diagnostics,
     })
-}
-
-async fn fetch_deployer(http: &Client, blockscout_url: &str, address: &str) -> Result<Option<String>> {
-    let url = format!(
-        "{}/api/v2/addresses/{}",
-        blockscout_url.trim_end_matches('/'),
-        address
-    );
-    let value = http
-        .get(url)
-        .send()
-        .await?
-        .error_for_status()?
-        .json::<Value>()
-        .await?;
-
-    Ok(value
-        .get("creator_address_hash")
-        .and_then(Value::as_str)
-        .and_then(normalize_address))
-}
-
-async fn fetch_holders(
-    http: &Client,
-    blockscout_url: &str,
-    address: &str,
-    limit: u32,
-) -> Result<Vec<String>> {
-    let url = format!("{}/api", blockscout_url.trim_end_matches('/'));
-    let limit_string = limit.max(1).to_string();
-    let value = http
-        .get(url)
-        .query(&[
-            ("module", "token"),
-            ("action", "getTokenHolders"),
-            ("contractaddress", address),
-            ("page", "1"),
-            ("offset", limit_string.as_str()),
-        ])
-        .send()
-        .await?
-        .error_for_status()?
-        .json::<Value>()
-        .await?;
-
-    let result = value
-        .get("result")
-        .and_then(Value::as_array)
-        .ok_or_else(|| anyhow!("unexpected getTokenHolders response: {value}"))?;
-
-    Ok(result
-        .iter()
-        .filter_map(|item| item.get("address").and_then(Value::as_str))
-        .filter_map(normalize_address)
-        .collect())
 }
 
 async fn select_real_holder(

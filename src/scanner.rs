@@ -91,7 +91,7 @@ impl Scanner {
                 match crate::providers::robinhood::fetch(
                     &self.http,
                     &self.cfg.robinhood.rpc_url,
-                    &self.cfg.robinhood.blockscout_url,
+                    &self.cfg.api.etherscan_api_key,
                     address,
                     self.cfg.robinhood.holders_limit,
                     self.cfg.robinhood.transfer_amount_divisor,
@@ -149,7 +149,7 @@ impl Scanner {
         if is_robinhood {
             outputs.skipped.push(SkippedCheck::new(
                 "tokensniffer",
-                "Robinhood Chain uses the native RPC/Blockscout risk gate instead",
+                "Robinhood Chain uses the native RPC/Etherscan risk gate instead",
             ));
         } else if self.cfg.api.tokensniffer_api_key.trim().is_empty() {
             outputs.skipped.push(SkippedCheck::new(
@@ -213,10 +213,31 @@ impl Scanner {
         }
 
         if is_robinhood {
-            outputs.skipped.push(SkippedCheck::new(
-                "etherscan",
-                "Robinhood Chain uses Blockscout, not Etherscan",
-            ));
+            let api_key = self
+                .cfg
+                .api
+                .etherscan_api_key
+                .trim();
+            match crate::providers::etherscan::fetch_robinhood_source(
+                &self.http,
+                address,
+                if api_key.is_empty() { None } else { Some(api_key) },
+            )
+            .await
+            {
+                Ok(v) => {
+                    info!(
+                        source_origin = %v.source_origin,
+                        source_files = v.source_files.len(),
+                        "Robinhood Etherscan source check completed"
+                    );
+                    outputs.etherscan_source = Some(v);
+                }
+                Err(e) => {
+                    warn!(error = %e, "Robinhood Etherscan source check failed");
+                    outputs.errors.push(ProviderError::new("etherscan", e));
+                }
+            }
         } else if self.cfg.api.etherscan_api_key.trim().is_empty() {
             outputs.skipped.push(SkippedCheck::new(
                 "etherscan",
@@ -282,5 +303,6 @@ fn unsupported_chain_report(chain_id: String, address: String, message: String) 
             robinhood: "not_run".to_string(),
         },
         robinhood_risk: None,
+        source_analysis: None,
     }
 }

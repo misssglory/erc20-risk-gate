@@ -14,6 +14,6 @@ Provider mapping:
 | Ethereum | `1` | `ethereum` | — |
 | Base | `8453` | `base` | — |
 | BSC | `56` | `bsc` | — |
-| Robinhood Chain | `4663` | `robinhood` | RPC + Blockscout honeypot gate |
+| Robinhood Chain | `4663` | `robinhood` | RPC + Etherscan V2 honeypot gate |
 
-For Robinhood Chain, TokenSniffer, Honeypot.is and Etherscan are intentionally not used by the scan path. The native gate uses the configured Robinhood RPC and Blockscout endpoints, while GoPlus and DexScreener remain supplemental providers.
+For Robinhood Chain, TokenSniffer and Honeypot.is are intentionally not used by the scan path. The native gate uses Etherscan V2 for deployer/source/holder discovery and the configured Robinhood RPC only for direct EVM reads and holder transfer simulation. GoPlus and DexScreener remain supplemental providers.

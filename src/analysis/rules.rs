@@ -1,4 +1,4 @@
-use crate::analysis::source_scan::scan_source_code;
+use crate::analysis::source_scan::{build_source_analysis, combined_source_code, scan_source_code};
 use crate::analysis::value_ext::{
     bool_at, first_goplus_token, number_at, recursive_bool, recursive_number,
 };
@@ -41,15 +41,15 @@ pub fn analyze(
             &mut hard_blocks,
             &mut warnings,
         );
-
-        analyze_etherscan_source(
-            outputs.etherscan_source.as_ref(),
-            rules,
-            &mut score,
-            &mut hard_blocks,
-            &mut warnings,
-        );
     }
+
+    analyze_etherscan_source(
+        outputs.etherscan_source.as_ref(),
+        rules,
+        &mut score,
+        &mut hard_blocks,
+        &mut warnings,
+    );
 
     analyze_goplus(
         outputs.goplus.as_ref(),
@@ -85,6 +85,7 @@ pub fn analyze(
     };
 
     let robinhood_risk = outputs.robinhood.clone();
+    let source_analysis = outputs.etherscan_source.as_ref().map(build_source_analysis);
 
     RiskReport {
         chain_id,
@@ -97,6 +98,7 @@ pub fn analyze(
         provider_errors: outputs.errors,
         provider_status,
         robinhood_risk,
+        source_analysis,
     }
 }
 
@@ -480,7 +482,8 @@ fn analyze_etherscan_source(
         return;
     };
 
-    let source_code = contract.source_code.trim();
+    let source_code = combined_source_code(contract);
+    let source_code = source_code.trim();
 
     if source_code.is_empty() || source_code == "Contract source code not verified" {
         if rules.skip_unverified_source {

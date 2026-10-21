@@ -48,7 +48,6 @@ pub struct ApiConfig {
 pub struct RobinhoodConfig {
     pub enabled: bool,
     pub rpc_url: String,
-    pub blockscout_url: String,
     pub holders_limit: u32,
     pub transfer_amount_divisor: u32,
     pub transfer_target: String,
@@ -141,7 +140,6 @@ impl Default for RobinhoodConfig {
         Self {
             enabled: true,
             rpc_url: "https://rpc.mainnet.chain.robinhood.com".to_string(),
-            blockscout_url: "https://robinhoodchain.blockscout.com".to_string(),
             holders_limit: 50,
             transfer_amount_divisor: 100,
             transfer_target: "0x8366a39cc670b4001a1121b8f6a443a643e40951".to_string(),

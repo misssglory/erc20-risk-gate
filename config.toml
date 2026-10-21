@@ -13,14 +13,13 @@ timeout_seconds = 20
 
 [api]
 tokensniffer_api_key = ""
-etherscan_api_key = ""
+etherscan_api_key = "42SF3SUB2FZN5I5GFDTQGN37QEMP5EG67U"
 goplus_token = ""
 
-# Native Robinhood Chain risk gate. Used when chain_id resolves to 4663.
+# Native Robinhood Chain risk gate. Uses Etherscan V2 for explorer data and the official RPC for direct eth_call/getCode simulation.
 [robinhood]
 enabled = true
 rpc_url = "https://rpc.mainnet.chain.robinhood.com"
-blockscout_url = "https://robinhoodchain.blockscout.com"
 
 # Inspect this many top holders, skipping deployer/owner/contracts, until a real EOA is found.
 holders_limit = 50

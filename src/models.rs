@@ -1,3 +1,4 @@
+use crate::analysis::source_scan::SourceAnalysis;
 use crate::providers::etherscan::EtherscanContract;
 use crate::providers::robinhood::RobinhoodRiskResult;
 use serde::Serialize;
@@ -28,6 +29,8 @@ pub struct RiskReport {
     pub provider_status: ProviderStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub robinhood_risk: Option<RobinhoodRiskResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_analysis: Option<SourceAnalysis>,
 }
 
 #[derive(Debug, Clone, Serialize)]
